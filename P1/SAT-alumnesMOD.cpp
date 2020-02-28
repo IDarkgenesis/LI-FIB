@@ -17,27 +17,53 @@ uint numVars;
 uint numClauses;
 vector<vector<int> > clauses;
 vector<int> model;
-//INTENTAR UTILIZAR LA STRUCT COMO MODEL
+
+//NOMES ANAR ON CAL EVALUAR SI NEGATIU ANAR A POSITIUS I A AL REVÉS
 vector<vector2> ocurrList;
+
+vector<int> conflicts;
+
+//UTILITZAR HEURISTIC
+vector<double> heu;
+int LIMIT= 250;
+int PLUS= 25;
+int PEN= 2;
+
 ////////////////////////////////////////
+
 vector<int> modelStack;
 uint indexOfNextLitToPropagate;
 uint decisionLevel;
 
+//INFO PER IMPRIMIR
+double elapsed_time;
+int decisions=0;
+
+void print_end(){
+    cout << "Time: " << double(double(clock()) - elapsed_time) / CLOCKS_PER_SEC << endl;
+    cout << "Decisions: " << decisions << endl;
+}
 
 void readClauses(){
 	// Skip comments
 	char c = cin.get();
-	while (c == 'c') {
+	
+    while (c == 'c') {
 		while (c != '\n') c = cin.get();
 		c = cin.get();
 	}  
+	
 	// Read "cnf numVars numClauses"
 	string aux;
 	cin >> aux >> numVars >> numClauses;
 	clauses.resize(numClauses);
-	ocurrList.resize(numVars+1);
-	// Read clauses
+
+    ocurrList.resize(numVars+1);
+	conflicts= vector<int> (numVars+1, 0);
+    
+    heu= vector<double> (numVars+1,0);
+    
+    // Read clauses
 	for (uint i = 0; i < numClauses; ++i) {
 		int lit;
 		while (cin >> lit and lit != 0) {
@@ -45,14 +71,17 @@ void readClauses(){
 			if(lit > 0) ocurrList[lit].isT.push_back(i);
 			else ocurrList[-lit].isF.push_back(i);
 		}
-	}    
+	}
+	//cout << "READ" << endl;
 }
 
 
 
 int currentValueInModel(int lit){
-	if (lit >= 0) return model[lit];
-	else {
+	
+    if (lit >= 0) return model[lit];
+	
+    else {
 		if (model[-lit] == UNDEF) return UNDEF;
 		else return 1 - model[-lit];
 	}
@@ -68,19 +97,41 @@ void setLiteralToTrue(int lit){
 
 bool propagateGivesConflict ( ) {
 	while ( indexOfNextLitToPropagate < modelStack.size() ) {
-		++indexOfNextLitToPropagate;
-		for (uint i = 0; i < numClauses; ++i) {
+		int lit= modelStack[indexOfNextLitToPropagate];
+        vector<int> *OCclauses;
+        
+        if (lit < 0)  OCclauses= &ocurrList[-lit].isT;
+        else OCclauses= &ocurrList[lit].isF;
+        
+        
+		for (uint i = 0; i < (*OCclauses).size(); ++i) {
 			bool someLitTrue = false;
 			int numUndefs = 0;
 			int lastLitUndef = 0;
-			for (uint k = 0; not someLitTrue and k < clauses[i].size(); ++k){
-				int val = currentValueInModel(clauses[i][k]);
+            int aux= (*OCclauses)[i];
+			
+            for (uint k = 0; not someLitTrue and k < clauses[aux].size(); ++k){
+				int val = currentValueInModel(clauses[aux][k]);
 				if (val == TRUE) someLitTrue = true;
-				else if (val == UNDEF){ ++numUndefs; lastLitUndef = clauses[i][k]; }
+				else if (val == UNDEF){ ++numUndefs; lastLitUndef = clauses[aux][k]; }
 			}
-			if (not someLitTrue and numUndefs == 0) return true; // conflict! all lits false
-			else if (not someLitTrue and numUndefs == 1) setLiteralToTrue(lastLitUndef);	
-		}    
+			
+			if (not someLitTrue and numUndefs == 0) {
+                
+                for(uint f=0; f < clauses[aux].size(); ++f){
+                    
+                    int aux2=clauses[aux][f];
+                    
+                    if(aux2 < 0) ++conflicts[-aux2];
+                    else ++conflicts[aux2];
+                }
+                return true;
+            } 
+            else if (not someLitTrue and numUndefs == 1) setLiteralToTrue(lastLitUndef);	
+		}
+		//cout << "Una Propagacio" << endl;
+        
+		++indexOfNextLitToPropagate;
 	}
 	return false;
 }
@@ -105,11 +156,26 @@ void backtrack(){
 
 // Heuristic for finding the next decision literal:
 int getNextDecisionLiteral(){
-	// stupid heuristic:
-    for (uint i = 1; i <= numVars; ++i){
-        if (model[i] == UNDEF) return i;  // returns first UNDEF var, positively
-    } 
-    return 0; // reurns 0 when all literals are defined
+    ++decisions;
+    
+    bool first = true;
+    int index =0, max=0;
+    
+    for(uint i=1; i < conflicts.size(); ++i){
+        if(first && model[i] == UNDEF){
+            max= conflicts[i];
+            index=i;
+            first=false;
+        }
+        if(model[i] == UNDEF && max < conflicts[i]){
+            max = conflicts[i];
+            index = i;
+        }
+    }
+    conflicts[index]=0;
+    
+    return index;
+    
 }
 
 void checkmodel(){
@@ -141,16 +207,16 @@ int main(){
 			else if (val == UNDEF) setLiteralToTrue(lit); //ELS POSA A TRUE PER A QUE NO SIGUI ISTATISFACTBILE
 		}
     }
-
+        elapsed_time=clock();
 		
 		// DPLL algorithm
 		while (true) {
 			while ( propagateGivesConflict() ) {
-				if ( decisionLevel == 0) { cout << "UNSATISFIABLE" << endl; return 10; }
+				if ( decisionLevel == 0) { cout << "UNSATISFIABLE" << endl; print_end();return 10; }
 				backtrack();
 			}
 			int decisionLit = getNextDecisionLiteral();
-			if (decisionLit == 0) { checkmodel(); cout << "SATISFIABLE" << endl; return 20; }
+			if (decisionLit == 0) { checkmodel(); cout << "SATISFIABLE" << endl; print_end();return 20; }
 			// start new decision level:
 			modelStack.push_back(0);  // push mark indicating new DL
 			++indexOfNextLitToPropagate;
